@@ -1,7 +1,7 @@
 # 🚦 AI Smart Traffic Management System — Feature Showcase
 
-> **Live Local Gateway**: [http://localhost:3000](http://localhost:3000)  
-> **Interactive API Docs**: [http://localhost:8000/api/docs](http://localhost:8000/api/docs)
+> **Live Command Center**: [traffic-ai-frontend-wlie.onrender.com](https://traffic-ai-frontend-wlie.onrender.com)  
+> **Backend API & Swagger**: [traffic-ai-backend-xu5g.onrender.com/api/docs](https://traffic-ai-backend-xu5g.onrender.com/api/docs)
 
 A production-engineered, end-to-end intelligent transportation management platform. Built with **FastAPI**, **YOLOv11**, **ByteTrack**, **PostgreSQL**, **Redis**, and a high-performance **Next.js 14** operational command center.
 

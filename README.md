@@ -17,15 +17,15 @@ Built from first principles without mock animations or static timers. The platfo
 
 ---
 
-## 🚀 Access Points & Services
+## 🚀 Live Demo & Access Points
 
-| Service | Access URL | Credentials / Notes |
-|---|---|---|
-| 🖥️ **God's Eye Command Center** | [http://localhost](http://localhost) *(via Nginx)* or [http://localhost:3000](http://localhost:3000) | `admin` / `admin123` *(Operator: `operator` / `operator123`)* |
-| ⚙️ **FastAPI Backend Gateway** | [http://localhost:8000](http://localhost:8000) | Core Asynchronous REST & WebSocket Server |
-| 📖 **Interactive Swagger Docs** | [http://localhost:8000/api/docs](http://localhost:8000/api/docs) | Complete OpenAPI 3.1 specification & test bench |
-| 📚 **ReDoc Specification** | [http://localhost:8000/api/redoc](http://localhost:8000/api/redoc) | Human-readable REST reference |
-| 🩺 **System Health Probe** | [http://localhost:8000/health](http://localhost:8000/health) | Docker/Kubernetes liveness verification |
+| Service | Live Cloud URL (Render) | Local URL | Credentials / Notes |
+|---|---|---|---|
+| 🖥️ **God's Eye Command Center** | [traffic-ai-frontend-wlie.onrender.com](https://traffic-ai-frontend-wlie.onrender.com) | [http://localhost:3000](http://localhost:3000) | `admin` / `admin123` *(Operator: `operator` / `operator123`)* |
+| ⚙️ **FastAPI Backend Gateway** | [traffic-ai-backend-xu5g.onrender.com](https://traffic-ai-backend-xu5g.onrender.com) | [http://localhost:8000](http://localhost:8000) | Core Asynchronous REST & WebSocket Server |
+| 📖 **Interactive Swagger Docs** | [traffic-ai-backend-xu5g.onrender.com/api/docs](https://traffic-ai-backend-xu5g.onrender.com/api/docs) | [http://localhost:8000/api/docs](http://localhost:8000/api/docs) | Complete OpenAPI 3.1 specification & test bench |
+| 📚 **ReDoc Specification** | [traffic-ai-backend-xu5g.onrender.com/api/redoc](https://traffic-ai-backend-xu5g.onrender.com/api/redoc) | [http://localhost:8000/api/redoc](http://localhost:8000/api/redoc) | Human-readable REST reference |
+| 🩺 **System Health Probe** | [traffic-ai-backend-xu5g.onrender.com/health](https://traffic-ai-backend-xu5g.onrender.com/health) | [http://localhost:8000/health](http://localhost:8000/health) | Docker/Kubernetes liveness verification |
 
 ---
 
