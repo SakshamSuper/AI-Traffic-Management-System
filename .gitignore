@@ -1,0 +1,91 @@
+# ==============================================================================
+# AI Smart Traffic Management System - Root .gitignore
+# ==============================================================================
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.coveragerc
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+backend/traffic.db
+
+# Environment & Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+frontend/.env.local
+
+# Node.js & Next.js Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.vercel
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# AI Models & Large Weights (download via scripts/models README)
+models/*.pt
+models/*.onnx
+models/*.engine
+backend/models/*.pt
+backend/models/*.onnx
+backend/models/*.engine
+backend/yolo11n.pt
+
+# Media Outputs & Temp Cache
+backend/tmp/
+backend/media/snapshots/*
+!backend/media/snapshots/.gitkeep
+backend/media/reports/*
+!backend/media/reports/.gitkeep
+backend/logs/
+*.log
+
+# Large Raw Video Captures (handled via Git LFS or external storage)
+backend/assets/*.mp4
+backend/assets/*.avi
+backend/assets/*.mkv
