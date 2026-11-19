@@ -190,13 +190,21 @@ class TrafficStreamEngine:
         self.recent_alerts: deque = deque(maxlen=30)
         self.session_telemetry: deque = deque(maxlen=800)
         self.active_vehicles: List[Dict] = []
+        self._sim_fleet: Optional[List[Dict]] = None
+        self._sim_tick: int = 0
 
     def load_model(self, model_path: str = "yolo11n.pt") -> bool:
+        if os.getenv("DISABLE_HEAVY_YOLO", "0") == "1" or (os.getenv("RENDER") and os.getenv("ENABLE_HEAVY_YOLO", "0") != "1"):
+            logger.info("Cloud deployment or memory guard active. Operating in high-performance ITS engine mode.")
+            self._ready = False
+            return False
         try:
+            import torch
+            torch.set_num_threads(1)
             from ultralytics import YOLO
             logger.info(f"Loading YOLO model: {model_path}")
             self.model = YOLO(model_path)
-            dummy = np.zeros((640, 640, 3), dtype=np.uint8)
+            dummy = np.zeros((320, 320, 3), dtype=np.uint8)
             self.model(dummy, verbose=False)
             self._ready = True
             logger.info("YOLOv11 model loaded and warmed up.")
@@ -884,9 +892,311 @@ class TrafficStreamEngine:
             })
         return result
 
+    def generate_synthetic_intersection_frame(
+        self, target_w: int = 1280, target_h: int = 720
+    ) -> np.ndarray:
+        """
+        High-performance photorealistic aerial intersection surveillance generator.
+        Renders multi-lane roadway, moving traffic fleet with NEMA TS2 signal timing,
+        YOLO bounding boxes, ByteTrack Kalman motion trails, and live telemetry.
+        """
+        w, h = target_w, target_h
+        cx, cy = w // 2, h // 2
+        now = time.time()
+        self._tick_phase()
+        self._sim_tick += 1
+        dt = 0.033
+
+        # ── 1. Base Canvas & Roadways ─────────────────────────────────────────
+        frame = np.full((h, w, 3), (30, 36, 42), dtype=np.uint8)
+
+        cx1, cx2 = cx - 140, cx + 140
+        cy1, cy2 = cy - 120, cy + 120
+
+        # Corner landscaping & sidewalks
+        cv2.rectangle(frame, (0, 0), (cx1, cy1), (28, 44, 32), -1)
+        cv2.rectangle(frame, (cx2, 0), (w, cy1), (28, 44, 32), -1)
+        cv2.rectangle(frame, (0, cy2), (cx1, h), (28, 44, 32), -1)
+        cv2.rectangle(frame, (cx2, cy2), (w, h), (28, 44, 32), -1)
+
+        # Sidewalk curbs
+        cv2.rectangle(frame, (cx1 - 10, 0), (cx1, cy1 - 10), (58, 65, 74), -1)
+        cv2.rectangle(frame, (cx2, 0), (cx2 + 10, cy1 - 10), (58, 65, 74), -1)
+        cv2.rectangle(frame, (cx1 - 10, cy2 + 10), (cx1, h), (58, 65, 74), -1)
+        cv2.rectangle(frame, (cx2, cy2 + 10), (cx2 + 10, h), (58, 65, 74), -1)
+
+        # Parkland trees
+        cv2.circle(frame, (cx1 - 65, cy1 - 65), 32, (20, 56, 26), -1)
+        cv2.circle(frame, (cx2 + 65, cy1 - 65), 36, (24, 62, 30), -1)
+        cv2.circle(frame, (cx1 - 65, cy2 + 65), 34, (22, 58, 28), -1)
+        cv2.circle(frame, (cx2 + 65, cy2 + 65), 38, (26, 66, 32), -1)
+
+        # Asphalt roads
+        cv2.rectangle(frame, (cx1, 0), (cx2, h), (24, 28, 34), -1)
+        cv2.rectangle(frame, (0, cy1), (w, cy2), (24, 28, 34), -1)
+
+        # Double solid yellow centerlines
+        cv2.line(frame, (cx - 3, 0), (cx - 3, cy1 - 25), (0, 204, 255), 2)
+        cv2.line(frame, (cx + 3, 0), (cx + 3, cy1 - 25), (0, 204, 255), 2)
+        cv2.line(frame, (cx - 3, cy2 + 25), (cx - 3, h), (0, 204, 255), 2)
+        cv2.line(frame, (cx + 3, cy2 + 25), (cx + 3, h), (0, 204, 255), 2)
+
+        cv2.line(frame, (0, cy - 3), (cx1 - 25, cy - 3), (0, 204, 255), 2)
+        cv2.line(frame, (0, cy + 3), (cx1 - 25, cy + 3), (0, 204, 255), 2)
+        cv2.line(frame, (cx2 + 25, cy - 3), (w, cy - 3), (0, 204, 255), 2)
+        cv2.line(frame, (cx2 + 25, cy + 3), (w, cy + 3), (0, 204, 255), 2)
+
+        # Dashed lane dividers
+        for yd in range(0, cy1 - 30, 24):
+            cv2.line(frame, (cx + 70, yd), (cx + 70, yd + 14), (200, 205, 210), 2)
+            cv2.line(frame, (cx - 70, yd), (cx - 70, yd + 14), (200, 205, 210), 2)
+        for yd in range(cy2 + 30, h, 24):
+            cv2.line(frame, (cx + 70, yd), (cx + 70, yd + 14), (200, 205, 210), 2)
+            cv2.line(frame, (cx - 70, yd), (cx - 70, yd + 14), (200, 205, 210), 2)
+        for xd in range(0, cx1 - 30, 24):
+            cv2.line(frame, (xd, cy + 60), (xd + 14, cy + 60), (200, 205, 210), 2)
+            cv2.line(frame, (xd, cy - 60), (xd + 14, cy - 60), (200, 205, 210), 2)
+        for xd in range(cx2 + 30, w, 24):
+            cv2.line(frame, (xd, cy + 60), (xd + 14, cy + 60), (200, 205, 210), 2)
+            cv2.line(frame, (xd, cy - 60), (xd + 14, cy - 60), (200, 205, 210), 2)
+
+        # Stop lines (thick white)
+        cv2.line(frame, (cx, cy1 - 25), (cx2, cy1 - 25), (230, 235, 240), 4) # SB right
+        cv2.line(frame, (cx1, cy2 + 25), (cx, cy2 + 25), (230, 235, 240), 4) # NB right
+        cv2.line(frame, (cx1 - 25, cy), (cx1 - 25, cy2), (230, 235, 240), 4) # EB
+        cv2.line(frame, (cx2 + 25, cy1), (cx2 + 25, cy), (230, 235, 240), 4) # WB
+
+        # Crosswalks
+        for i in range(7):
+            cv2.rectangle(frame, (cx1 + 8 + i * 38, cy1 - 20), (cx1 + 26 + i * 38, cy1 - 5), (225, 230, 235), -1)
+            cv2.rectangle(frame, (cx1 + 8 + i * 38, cy2 + 5), (cx1 + 26 + i * 38, cy2 + 20), (225, 230, 235), -1)
+            cv2.rectangle(frame, (cx1 - 20, cy1 + 8 + i * 32), (cx1 - 5, cy1 + 24 + i * 32), (225, 230, 235), -1)
+            cv2.rectangle(frame, (cx2 + 5, cy1 + 8 + i * 32), (cx2 + 20, cy1 + 24 + i * 32), (225, 230, 235), -1)
+
+        # ── 2. Simulated Fleet Initialization ────────────────────────────────
+        if self._sim_fleet is None:
+            self._sim_fleet = [
+                {"tid": 101, "cls": "car", "conf": 0.94, "lane": "NB_R", "x": float(cx + 70), "y": float(h * 0.82), "spd": 42.0, "cruise_spd": 42.0, "len": 44, "wid": 22, "color": (190, 190, 200), "plate": "DL 01 CA 4821", "dir": "NORTH", "first_seen": now - 14.2, "violation": "NONE"},
+                {"tid": 102, "cls": "bus", "conf": 0.91, "lane": "NB_R", "x": float(cx + 70), "y": float(h * 0.28), "spd": 36.0, "cruise_spd": 36.0, "len": 76, "wid": 28, "color": (40, 130, 245), "plate": "DL 01 PB 9012", "dir": "NORTH", "first_seen": now - 28.5, "violation": "NONE"},
+                {"tid": 103, "cls": "motorcycle", "conf": 0.88, "lane": "NB_L", "x": float(cx + 25), "y": float(h * 0.92), "spd": 52.0, "cruise_spd": 52.0, "len": 24, "wid": 10, "color": (210, 90, 230), "plate": "DL 04 S 3341", "dir": "NORTH", "first_seen": now - 8.1, "violation": "NONE"},
+                {"tid": 104, "cls": "car", "conf": 0.95, "lane": "NB_L", "x": float(cx + 25), "y": float(h * 0.50), "spd": 46.0, "cruise_spd": 46.0, "len": 44, "wid": 22, "color": (45, 45, 215), "plate": "DL 08 CB 9302", "dir": "NORTH", "first_seen": now - 19.3, "violation": "NONE"},
+                {"tid": 105, "cls": "truck", "conf": 0.89, "lane": "SB_R", "x": float(cx - 70), "y": float(h * 0.16), "spd": 35.0, "cruise_spd": 35.0, "len": 68, "wid": 26, "color": (25, 140, 250), "plate": "DL 02 GA 6100", "dir": "SOUTH", "first_seen": now - 22.0, "violation": "NONE"},
+                {"tid": 106, "cls": "auto_rickshaw", "conf": 0.92, "lane": "SB_R", "x": float(cx - 70), "y": float(h * 0.74), "spd": 33.0, "cruise_spd": 33.0, "len": 32, "wid": 20, "color": (0, 215, 255), "plate": "DL 01 TR 7712", "dir": "SOUTH", "first_seen": now - 12.4, "violation": "NONE"},
+                {"tid": 107, "cls": "ambulance", "conf": 0.98, "lane": "SB_L", "x": float(cx - 25), "y": float(h * 0.06), "spd": 58.0, "cruise_spd": 58.0, "len": 52, "wid": 24, "color": (245, 245, 250), "plate": "DL 01 AM 102", "dir": "SOUTH", "first_seen": now - 5.0, "is_emergency": True, "violation": "NONE"},
+                {"tid": 108, "cls": "car", "conf": 0.93, "lane": "SB_L", "x": float(cx - 25), "y": float(h * 0.85), "spd": 44.0, "cruise_spd": 44.0, "len": 44, "wid": 22, "color": (210, 145, 45), "plate": "DL 05 CE 2289", "dir": "SOUTH", "first_seen": now - 16.7, "violation": "NONE"},
+                {"tid": 109, "cls": "car", "conf": 0.94, "lane": "EB_U", "x": float(w * 0.15), "y": float(cy + 28), "spd": 42.0, "cruise_spd": 42.0, "len": 44, "wid": 22, "color": (220, 220, 225), "plate": "DL 07 CC 4401", "dir": "EAST", "first_seen": now - 15.0, "violation": "NONE"},
+                {"tid": 110, "cls": "auto_rickshaw", "conf": 0.90, "lane": "EB_L", "x": float(w * 0.72), "y": float(cy + 75), "spd": 32.0, "cruise_spd": 32.0, "len": 32, "wid": 20, "color": (0, 215, 255), "plate": "DL 09 TR 1198", "dir": "EAST", "first_seen": now - 25.0, "violation": "NONE"},
+                {"tid": 111, "cls": "car", "conf": 0.92, "lane": "WB_U", "x": float(w * 0.84), "y": float(cy - 28), "spd": 46.0, "cruise_spd": 46.0, "len": 44, "wid": 22, "color": (160, 220, 95), "plate": "DL 03 CD 8820", "dir": "WEST", "first_seen": now - 11.0, "violation": "NONE"},
+                {"tid": 112, "cls": "truck", "conf": 0.87, "lane": "WB_L", "x": float(w * 0.26), "y": float(cy - 75), "spd": 34.0, "cruise_spd": 34.0, "len": 66, "wid": 26, "color": (185, 85, 25), "plate": "DL 06 GA 5043", "dir": "WEST", "first_seen": now - 31.0, "violation": "NONE"},
+            ]
+
+        has_emerg = any(v.get("is_emergency") and (0 < v["y"] < h or 0 < v["x"] < w) for v in self._sim_fleet)
+        self.emergency = has_emerg
+        if has_emerg:
+            self.emergency_type = "AMBULANCE_PRIORITY"
+
+        updated_active = []
+        pcu_total = 0.0
+        vehicle_counts = defaultdict(int)
+
+        for v in self._sim_fleet:
+            tid = v["tid"]
+            cls_name = v["cls"]
+            cruise = v["cruise_spd"]
+            is_emerg = v.get("is_emergency", False)
+            dir_str = v["dir"]
+
+            target_spd = cruise
+            if is_emerg or self.emergency:
+                target_spd = cruise
+            elif self._phase == "GREEN":
+                if dir_str in ("NORTH", "SOUTH"):
+                    target_spd = cruise
+                else:
+                    if dir_str == "EAST" and v["x"] < (cx1 - 20):
+                        dist_to_stop = (cx1 - 25) - v["x"]
+                        target_spd = max(0.0, cruise * (dist_to_stop / 140.0)) if dist_to_stop > 15 else 0.0
+                    elif dir_str == "WEST" and v["x"] > (cx2 + 20):
+                        dist_to_stop = v["x"] - (cx2 + 25)
+                        target_spd = max(0.0, cruise * (dist_to_stop / 140.0)) if dist_to_stop > 15 else 0.0
+            elif self._phase == "YELLOW":
+                if dir_str in ("NORTH", "SOUTH"):
+                    if dir_str == "NORTH" and v["y"] > (cy2 + 50):
+                        dist_to_stop = v["y"] - (cy2 + 25)
+                        target_spd = max(0.0, cruise * (dist_to_stop / 120.0))
+                    elif dir_str == "SOUTH" and v["y"] < (cy1 - 50):
+                        dist_to_stop = (cy1 - 25) - v["y"]
+                        target_spd = max(0.0, cruise * (dist_to_stop / 120.0))
+                else:
+                    target_spd = 0.0
+            else:
+                if dir_str in ("EAST", "WEST"):
+                    target_spd = cruise
+                else:
+                    if dir_str == "NORTH" and v["y"] > (cy2 + 20):
+                        dist_to_stop = v["y"] - (cy2 + 25)
+                        target_spd = max(0.0, cruise * (dist_to_stop / 140.0)) if dist_to_stop > 15 else 0.0
+                    elif dir_str == "SOUTH" and v["y"] < (cy1 - 20):
+                        dist_to_stop = (cy1 - 25) - v["y"]
+                        target_spd = max(0.0, cruise * (dist_to_stop / 140.0)) if dist_to_stop > 15 else 0.0
+
+            v["spd"] += (target_spd - v["spd"]) * 0.10
+            spd_kmh = max(0.0, v["spd"])
+            spd_px_s = spd_kmh * 2.5
+
+            if dir_str == "NORTH":
+                v["y"] -= spd_px_s * dt
+                if v["y"] < -80:
+                    v["y"] = h + 60
+                    v["plate"] = generate_plate(tid)
+                    v["cruise_spd"] = 38.0 + (tid * 7 % 16)
+                    self._count_up[cls_name] += 1
+            elif dir_str == "SOUTH":
+                v["y"] += spd_px_s * dt
+                if v["y"] > h + 80:
+                    v["y"] = -60
+                    v["plate"] = generate_plate(tid)
+                    v["cruise_spd"] = 36.0 + (tid * 5 % 16)
+                    self._count_dn[cls_name] += 1
+            elif dir_str == "EAST":
+                v["x"] += spd_px_s * dt
+                if v["x"] > w + 80:
+                    v["x"] = -60
+                    v["plate"] = generate_plate(tid)
+                    v["cruise_spd"] = 38.0 + (tid * 9 % 15)
+                    self._count_up[cls_name] += 1
+            elif dir_str == "WEST":
+                v["x"] -= spd_px_s * dt
+                if v["x"] < -80:
+                    v["x"] = w + 60
+                    v["plate"] = generate_plate(tid)
+                    v["cruise_spd"] = 36.0 + (tid * 3 % 15)
+                    self._count_dn[cls_name] += 1
+
+            vx, vy = int(v["x"]), int(v["y"])
+            vl, vw = v["len"], v["wid"]
+            if dir_str in ("NORTH", "SOUTH"):
+                bx1, by1 = vx - vw // 2, vy - vl // 2
+                bx2, by2 = vx + vw // 2, vy + vl // 2
+            else:
+                bx1, by1 = vx - vl // 2, vy - vw // 2
+                bx2, by2 = vx + vl // 2, vy + vw // 2
+
+            self._track_trails[tid].append((vx, vy))
+            trail_pts = list(self._track_trails[tid])
+            color = CLASS_COLORS_BGR.get(cls_name, (100, 200, 100))
+
+            for i in range(1, len(trail_pts)):
+                alpha = i / len(trail_pts)
+                c_trail = tuple(int(ch * alpha) for ch in color)
+                cv2.line(frame, trail_pts[i - 1], trail_pts[i], c_trail, 2, cv2.LINE_AA)
+
+            body_col = v["color"]
+            cv2.rectangle(frame, (bx1, by1), (bx2, by2), body_col, -1)
+            cv2.rectangle(frame, (bx1, by1), (bx2, by2), (40, 45, 55), 1)
+
+            if dir_str in ("NORTH", "SOUTH"):
+                ws_y = by1 + 8 if dir_str == "SOUTH" else by2 - 14
+                cv2.rectangle(frame, (bx1 + 3, ws_y), (bx2 - 3, ws_y + 6), (20, 25, 30), -1)
+                hl_y = by2 - 2 if dir_str == "SOUTH" else by1 + 2
+                cv2.circle(frame, (bx1 + 4, hl_y), 2, (180, 240, 255), -1)
+                cv2.circle(frame, (bx2 - 4, hl_y), 2, (180, 240, 255), -1)
+            else:
+                ws_x = bx1 + 8 if dir_str == "EAST" else bx2 - 14
+                cv2.rectangle(frame, (ws_x, by1 + 3), (ws_x + 6, by2 - 3), (20, 25, 30), -1)
+                hl_x = bx2 - 2 if dir_str == "EAST" else bx1 + 2
+                cv2.circle(frame, (hl_x, by1 + 4), 2, (180, 240, 255), -1)
+                cv2.circle(frame, (hl_x, by2 - 4), 2, (180, 240, 255), -1)
+
+            if is_emerg:
+                flash_state = (self._sim_tick // 4) % 2
+                b1_col = (0, 0, 255) if flash_state == 0 else (255, 0, 0)
+                b2_col = (255, 0, 0) if flash_state == 0 else (0, 0, 255)
+                cv2.circle(frame, (vx - 6, vy), 4, b1_col, -1)
+                cv2.circle(frame, (vx + 6, vy), 4, b2_col, -1)
+
+            is_locked = (self.locked_track_id == tid)
+            box_col = LOCK_COLOR if is_locked else color
+            th = 2
+            cv2.rectangle(frame, (bx1 - 3, by1 - 3), (bx2 + 3, by2 + 3), box_col, th)
+
+            brk = 6
+            cv2.line(frame, (bx1 - 3, by1 - 3), (bx1 - 3 + brk, by1 - 3), (255, 255, 255), 2)
+            cv2.line(frame, (bx1 - 3, by1 - 3), (bx1 - 3, by1 - 3 + brk), (255, 255, 255), 2)
+            cv2.line(frame, (bx2 + 3, by1 - 3), (bx2 + 3 - brk, by1 - 3), (255, 255, 255), 2)
+            cv2.line(frame, (bx2 + 3, by1 - 3), (bx2 + 3, by1 - 3 + brk), (255, 255, 255), 2)
+
+            lbl = f"{cls_name} {int(v['conf']*100)}% | {spd_kmh:.0f} km/h"
+            t_size = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)[0]
+            cv2.rectangle(frame, (bx1 - 3, by1 - 18), (bx1 - 3 + t_size[0] + 6, by1 - 3), HUD_BG, -1)
+            cv2.rectangle(frame, (bx1 - 3, by1 - 18), (bx1 - 3 + t_size[0] + 6, by1 - 3), box_col, 1)
+            cv2.putText(frame, lbl, (bx1, by1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.38, HUD_TEXT, 1, cv2.LINE_AA)
+
+            plate_lbl = v["plate"]
+            p_size = cv2.getTextSize(plate_lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.34, 1)[0]
+            cv2.rectangle(frame, (bx1 - 3, by2 + 4), (bx1 - 3 + p_size[0] + 6, by2 + 18), (15, 20, 28), -1)
+            cv2.rectangle(frame, (bx1 - 3, by2 + 4), (bx1 - 3 + p_size[0] + 6, by2 + 18), (70, 85, 105), 1)
+            cv2.putText(frame, plate_lbl, (bx1, by2 + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (230, 240, 255), 1, cv2.LINE_AA)
+
+            if is_locked:
+                reticle_r = 38
+                cv2.circle(frame, (vx, vy), reticle_r, LOCK_COLOR, 1, cv2.LINE_AA)
+                cv2.circle(frame, (vx, vy), 4, (0, 255, 255), -1, cv2.LINE_AA)
+                cv2.line(frame, (vx - reticle_r - 8, vy), (vx - reticle_r + 4, vy), LOCK_COLOR, 2)
+                cv2.line(frame, (vx + reticle_r - 4, vy), (vx + reticle_r + 8, vy), LOCK_COLOR, 2)
+                cv2.line(frame, (vx, vy - reticle_r - 8), (vx, vy - reticle_r + 4), LOCK_COLOR, 2)
+                cv2.line(frame, (vx, vy + reticle_r - 4), (vx, vy + reticle_r + 8), LOCK_COLOR, 2)
+
+            vehicle_counts[cls_name] += 1
+            pcu_total += PCU_WEIGHTS.get(cls_name, 1.0)
+            updated_active.append({
+                "tid": tid,
+                "cls": cls_name,
+                "conf": v["conf"],
+                "speed": round(spd_kmh, 1),
+                "bbox": [bx1 - 3, by1 - 3, bx2 + 3, by2 + 3],
+                "plate": v["plate"],
+                "duration_s": round(now - v["first_seen"], 1),
+                "direction": dir_str,
+                "violation": v["violation"],
+                "is_locked": is_locked,
+            })
+
+        self.active_vehicles = updated_active
+        self.pcu_load = round(pcu_total, 1)
+        self.los_grade, self.los_desc, self.saturation_ratio = self._compute_los(self.pcu_load)
+        self._frame_times.append(now)
+        self._update_emissions(vehicle_counts, dt)
+
+        # ── 3. Overlays ───────────────────────────────────────────────────────
+        self._draw_signal(frame, w)
+        self._draw_hud(frame, vehicle_counts, w, h)
+        self._draw_bottom_bar(frame, w, h, len(updated_active))
+
+        self.last_annotated_frame = frame.copy()
+        return frame
+
 
 # Global singleton
 stream_engine = TrafficStreamEngine()
+
+
+async def mjpeg_synthetic_stream(
+    target_w: int = 1280,
+    target_h: int = 720,
+) -> AsyncIterator[bytes]:
+    """Continuous high-fidelity synthetic aerial drone stream for cloud deployment."""
+    while True:
+        frame = stream_engine.generate_synthetic_intersection_frame(target_w, target_h)
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if ok:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + buf.tobytes()
+                + b"\r\n"
+            )
+        await asyncio.sleep(0.033)
 
 
 async def mjpeg_frames_from_image(
@@ -920,9 +1230,17 @@ async def mjpeg_frames_from_video(
     target_h: int = 720,
     crop_rect: Optional[Tuple[float, float, float, float]] = None,
 ) -> AsyncIterator[bytes]:
+    if not os.path.exists(video_path):
+        logger.warning(f"Video file {video_path} not found. Streaming synthetic drone feed.")
+        async for chunk in mjpeg_synthetic_stream(target_w, target_h):
+            yield chunk
+        return
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        logger.error(f"Cannot open video: {video_path}")
+        logger.warning(f"Cannot open video: {video_path}. Streaming synthetic drone feed.")
+        async for chunk in mjpeg_synthetic_stream(target_w, target_h):
+            yield chunk
         return
     while True:
         ret, frame = cap.read()

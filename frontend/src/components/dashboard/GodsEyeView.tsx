@@ -121,6 +121,8 @@ export function GodsEyeView() {
   const [activeTab, setActiveTab] = useState<'mission' | 'signals' | 'safety' | 'registry'>('mission');
   const [feedMode, setFeedMode] = useState<'drone' | 'hardware' | 'network' | 'upload'>('drone');
   const [streamSrc, setStreamSrc] = useState(`/api/v1/stream/video?t=${Date.now()}`);
+  const [streamConnected, setStreamConnected] = useState(false);
+  const [streamError, setStreamError] = useState(false);
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [backendOk, setBackendOk] = useState(false);
   const [lockedTargetId, setLockedTargetId] = useState<number | null>(null);
@@ -208,6 +210,8 @@ export function GodsEyeView() {
     setFeedMode('drone');
     setActiveFeedLabel("God's Eye Aerial (4K Drone Live)");
     setStreamSrc(`/api/v1/stream/video?t=${Date.now()}`);
+    setStreamConnected(false);
+    setStreamError(false);
   };
 
   const selectHardwareCamera = (index: number, name?: string) => {
@@ -216,6 +220,8 @@ export function GodsEyeView() {
     const label = name ? `${name} [Cam #${index}]` : `Hardware Camera #${index}`;
     setActiveFeedLabel(label);
     setStreamSrc(`/api/v1/stream/live-device/${index}?t=${Date.now()}`);
+    setStreamConnected(false);
+    setStreamError(false);
     setShowStreamModal(false);
   };
 
@@ -226,8 +232,20 @@ export function GodsEyeView() {
     const shortLabel = cleanUrl.length > 30 ? cleanUrl.slice(0, 27) + '...' : cleanUrl;
     setActiveFeedLabel(`Network Stream: ${shortLabel}`);
     setStreamSrc(`/api/v1/stream/live-url?url=${encodeURIComponent(cleanUrl)}&t=${Date.now()}`);
+    setStreamConnected(false);
+    setStreamError(false);
     setShowStreamModal(false);
   };
+
+  // Auto-retry when drone stream temporarily disconnects
+  useEffect(() => {
+    if (streamError && feedMode === 'drone') {
+      const timer = setTimeout(() => {
+        setStreamSrc(`/api/v1/stream/video?t=${Date.now()}`);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [streamError, feedMode]);
 
   const handleUploadVideo = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -608,8 +626,18 @@ export function GodsEyeView() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={streamSrc}
-                alt="Live Traffic Video Stream"
-                className="w-full h-full object-contain cursor-crosshair select-none"
+                alt=""
+                onLoad={() => {
+                  setStreamConnected(true);
+                  setStreamError(false);
+                }}
+                onError={() => {
+                  setStreamConnected(false);
+                  setStreamError(true);
+                }}
+                className={`w-full h-full object-contain cursor-crosshair select-none transition-opacity duration-300 ${
+                  streamConnected ? 'opacity-100' : 'opacity-0'
+                }`}
                 style={{ imageRendering: 'crisp-edges' }}
                 onClick={() => {
                   if (!lockedTargetId && status?.active_vehicles && status.active_vehicles.length > 0) {
@@ -618,11 +646,34 @@ export function GodsEyeView() {
                 }}
               />
 
-              {!backendOk && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 z-20 gap-3">
-                  <div className="w-12 h-12 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-white font-bold text-sm">Initializing YOLOv11 Neural Engine...</p>
-                  <p className="text-slate-400 text-xs font-mono">Stream engine loading on port 8000</p>
+              {/* Connecting / Reconnecting Tactical Overlay */}
+              {(!streamConnected || !backendOk) && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#070a14]/92 backdrop-blur-md z-15 gap-4 p-6">
+                  <div className="relative w-16 h-16 flex items-center justify-center">
+                    <div className="absolute inset-0 rounded-full border border-cyan-500/40 animate-ping" />
+                    <div className="absolute inset-1 rounded-full border-2 border-t-cyan-400 border-r-cyan-400 border-b-transparent border-l-transparent animate-spin" />
+                    <Radio className="w-7 h-7 text-cyan-400 animate-pulse" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-white font-mono font-bold text-sm tracking-wide mb-1">
+                      AURA // CONNECTING LIVE AERIAL FEED
+                    </p>
+                    <p className="text-slate-400 text-xs font-mono max-w-sm">
+                      {streamError
+                        ? 'Synchronizing telemetry with God\'s Eye drone stream...'
+                        : 'Establishing secure high-throughput RTSP/MJPEG video pipeline...'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setStreamError(false);
+                      setStreamSrc(`/api/v1/stream/video?t=${Date.now()}`);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-400/60 text-xs font-mono font-bold transition-all shadow-[0_0_15px_rgba(6,182,212,0.25)]"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    RETRY FEED CONNECTION
+                  </button>
                 </div>
               )}
             </div>

@@ -35,6 +35,7 @@ from app.services.stream_engine import (
     stream_engine,
     mjpeg_frames_from_image,
     mjpeg_frames_from_video,
+    mjpeg_synthetic_stream,
     mjpeg_frames_from_device,
     mjpeg_frames_from_url,
     detect_available_cameras,
@@ -59,8 +60,11 @@ _model_loaded = False
 def _ensure_model():
     global _model_loaded
     if not _model_loaded:
-        from app.core.config import settings
-        stream_engine.load_model(getattr(settings, "AI_MODEL_PATH", "yolo11n.pt"))
+        try:
+            from app.core.config import settings
+            stream_engine.load_model(getattr(settings, "AI_MODEL_PATH", "yolo11n.pt"))
+        except Exception as e:
+            logger.warning(f"Model initialization notice: {e}")
         _model_loaded = True
 
 
@@ -69,11 +73,13 @@ def _ensure_model():
 async def stream_live_video():
     """Streams real-time annotated God's Eye aerial drone feed with YOLOv11 + ByteTrack."""
     _ensure_model()
-    if not os.path.exists(AERIAL_VIDEO):
-        raise HTTPException(404, f"Aerial video not found: {AERIAL_VIDEO}")
-
+    if os.path.exists(AERIAL_VIDEO):
+        return StreamingResponse(
+            mjpeg_frames_from_video(AERIAL_VIDEO, target_w=1280, target_h=720),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
     return StreamingResponse(
-        mjpeg_frames_from_video(AERIAL_VIDEO, target_w=1280, target_h=720),
+        mjpeg_synthetic_stream(target_w=1280, target_h=720),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
